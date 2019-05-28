@@ -21,6 +21,7 @@ class ViewController: UIViewController {
     @IBOutlet weak var indicator: UIActivityIndicatorView!
     
     var countedSequences = [(String,Int)]()
+    let client = Client()
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -28,7 +29,6 @@ class ViewController: UIViewController {
         message.text = Message.download.rawValue
         indicator.isHidden = true
         downloadBtn.addTarget(self, action: #selector(download(_:)), for: .touchUpInside)
-        
     }
     
     @objc func download(_ sender: UIButton) {
@@ -37,38 +37,39 @@ class ViewController: UIViewController {
         indicator.isHidden = false
         indicator.startAnimating()
         
-        DispatchQueue.global(qos: .default).async {
-            // Do heavy work here
-            let data = self.downloadData()
-            let unsortedList = self.splitString(with: data)
-            let sortedList = self.sortList(with: unsortedList)
-            let sequences = self.groupPageSequence(with: sortedList)
-            self.countedSequences = self.countOccurances(for: sequences)
-
-            DispatchQueue.main.async { [weak self] in
-                // UI updates must be on main thread
-                self?.indicator.stopAnimating()
-                self?.indicator.isHidden = true
+        client.downloadData() { [unowned self] data, error in
+            if let data = data{
+                let unsortedList = self.splitString(with: data)
+                let sortedList = self.sortList(with: unsortedList)
+                let sequences = self.groupPageSequence(with: sortedList)
+                self.countedSequences = self.countOccurances(for: sequences)
                 
-                let tableVC = UIStoryboard(name: "Main", bundle: nil).instantiateViewController(withIdentifier: "TableViewController") as! TableViewController
-                tableVC.sequences = self!.countedSequences
-                self!.present(tableVC, animated: true, completion: nil)
+                DispatchQueue.main.async { [weak self] in
+                    self?.indicator.stopAnimating()
+                    self?.indicator.isHidden = true
+                    self?.message.isHidden = true
+    
+                    let tableVC = UIStoryboard(name: "Main", bundle: nil).instantiateViewController(withIdentifier: "TableViewController") as! TableViewController
+                    tableVC.sequences = self!.countedSequences
+                    self!.present(tableVC, animated: true, completion: nil)
+                }
+                
+            }else {
+                self.indicator.stopAnimating()
+                self.indicator.isHidden = true
+                self.message.isHidden = true
+                
+                let error = error as! NetworkError
+                switch(error){
+                case .noInternetConnection:
+                    self.showErrorAlert(for: "Sorry could not connect to the internet. Please check your connection and try it again.")
+                case .requestFailed:
+                    self.showErrorAlert(for: "Sorry something went wrong with the server. Please try again later.")
+                case .responseUnsuccessful(let code):
+                    self.showErrorAlert(for: "Received code \(code) from the server. Please try again later.")
+                }
             }
         }
-    }
-
-    func downloadData() -> String{
-        var contents = ""
-        if let url = URL(string: "https://dev.inspiringapps.com/Files/IAChallenge/30E02AAA-B947-4D4B-8FB6-9C57C43872A9/Apache.log") {
-            do {
-                contents = try String(contentsOf: url)
-            } catch {
-                // contents could not be loaded
-            }
-        } else {
-            // the URL was bad!
-        }
-        return contents
     }
     
     func splitString(with data: String)->[Entry]{
@@ -110,6 +111,14 @@ class ViewController: UIViewController {
         list.forEach { counts[$0, default: 0] += 1 }
         let sortedCounts = counts.sorted(by: { $0.value > $1.value })
         return sortedCounts
+    }
+    
+    func showErrorAlert(for message:String){
+        DispatchQueue.main.async { [weak self] in
+            let ac = UIAlertController(title: "Error", message: message, preferredStyle: .alert)
+            ac.addAction(UIAlertAction(title: "DISMISS", style: .default))
+            self?.present(ac, animated: true)
+        }
     }
 }
 
